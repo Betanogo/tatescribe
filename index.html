@@ -171,7 +171,27 @@ button.chip:hover{text-decoration:underline}
 .rec-btn:hover{transform:scale(1.05)}
 .rec-btn span{width:26px;height:26px;border-radius:50%;background:#fff}
 .deck-row{display:flex;align-items:center;gap:18px}
-#jobsNew{margin-top:24px}
+.panels{align-items:start}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}
+/* confirm-before-transcribe card */
+.stage{background:var(--surface);border:1.5px solid var(--accent);border-radius:var(--radius-l);padding:16px 16px 14px;display:flex;flex-direction:column;gap:12px}
+.stage-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.stage-head b{font-size:15.5px}
+.si{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.si:first-child{border-top:0;padding-top:0}
+.si-play{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--bg);display:grid;place-items:center;color:var(--ink)}
+.si-play:hover{border-color:var(--accent);color:var(--accent)}
+.si-play.link{cursor:default;color:var(--muted)}
+.si-title{border:1px solid transparent;background:none;border-radius:7px;padding:2px 6px;margin-left:-6px;font-weight:600;width:100%;min-width:0}
+.si-title:hover{border-color:var(--line)}
+.si-title:focus{outline:none;border-color:var(--accent);background:var(--bg)}
+.si-meta{color:var(--faint);font-size:12.5px;display:flex;flex-wrap:wrap;gap:2px 10px;min-width:0}
+.si-meta .fn{max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.si-meta .ok{color:var(--accent)}
+.si .x{border:0;background:none;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.si .x:hover{background:var(--sunk);color:var(--rec)}
+.stage-foot{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.stage-foot .fine{margin-right:auto}
 .tips{margin-top:40px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;color:var(--muted);font-size:13.5px}
 .tips b{display:block;color:var(--ink);font-weight:600;margin-bottom:2px}
 
@@ -347,6 +367,7 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
       <p class="hero-sub">Upload audio, video or a link — or just start talking. TateScribe keeps up when you switch languages mid-sentence, labels who said what, and timestamps every line. 90+ languages.</p>
       <div class="notice" id="keyNote" hidden>You need an ElevenLabs API key to start. <button class="tb" data-settings>Add key</button></div>
       <div class="panels">
+        <div class="col">
         <div class="drop" id="drop">
           <div>
             <h2>Transcribe a file or link</h2>
@@ -363,6 +384,9 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
           </div>
           <div class="fine" id="newListNote" hidden></div>
         </div>
+        <div class="stage" id="stage" hidden aria-live="polite"></div>
+        <div class="jobs" id="jobsNew" aria-live="polite"></div>
+        </div>
         <div class="deck">
           <div>
             <h2>Record live</h2>
@@ -374,10 +398,10 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
           </div>
         </div>
       </div>
-      <div class="jobs" id="jobsNew" aria-live="polite"></div>
+      <audio id="stagePlayer" hidden></audio>
       <div class="tips">
         <div><b>Mixed languages, as spoken</b>No need to pick a language. Korean, English and French in the same sentence each come out in their own language.</div>
-        <div><b>Custom vocabulary</b>Add acronyms and names under Settings → Vocabulary and they'll be recognized more reliably.</div>
+        <div><b>Faster uploads</b>While you check the files, the audio is pulled out and shrunk to speech quality — a 1 GB video usually goes up as a few tens of MB.</div>
         <div><b>TXT by default</b>Export downloads a .txt in one tap. Word, SRT, VTT, Markdown and JSON are in the menu next to it.</div>
       </div>
     </section>
@@ -463,6 +487,7 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
     <label class="check"><input type="checkbox" id="sEvents"><span>Tag sounds<small>Mark non-speech like (laughter) or (applause).</small></span></label>
     <label class="check"><input type="checkbox" id="sClean"><span>Clean verbatim<small>Drop filler words like “um” and “uh”, false starts and stutters.</small></span></label>
     <label class="check"><input type="checkbox" id="sCs"><span>Highlight mixed languages<small>Colour the English (or other language) parts inside Korean, Japanese or Chinese lines.</small></span></label>
+    <label class="check"><input type="checkbox" id="sOpt"><span>Optimize audio before upload<small>Pulls out just the audio and shrinks it to speech quality (16 kHz mono) while you review the file. Much faster uploads for videos and WAV files; same transcript quality.</small></span></label>
     <label class="check"><input type="checkbox" id="sKeep"><span>Keep original audio<small>Store files up to 1 GB on this device so you can play them back and re-run them.</small></span></label>
     <div class="dlg-foot">
       <button type="button" class="btn btn-line" id="btnCancelSettings">Close</button>
@@ -493,7 +518,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 /* ---------- settings + lists ---------- */
-const DEFAULTS = { key: "", lang: "", speakers: "", terms: "", events: true, clean: false, cs: true, keep: true, theme: "", exportOpts: { time: true, spk: true }, sort: "new", bannerOff: false };
+const DEFAULTS = { key: "", lang: "", speakers: "", terms: "", events: true, clean: false, cs: true, keep: true, optimize: true, theme: "", exportOpts: { time: true, spk: true }, sort: "new", bannerOff: false };
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("ts.settings") || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -697,11 +722,12 @@ function apiError(status, body) {
   if (status === 429) return "Too many requests right now. Try again in a moment.";
   return (msg || "Unknown error") + (status ? ` (HTTP ${status})` : "");
 }
-function transcribeBatch({ file, url }, onProgress, onXhr) {
+function transcribeBatch({ file, url, pcm }, onProgress, onXhr) {
   const st = S.settings;
   const fd = new FormData();
   fd.append("model_id", "scribe_v2");
   if (file) fd.append("file", file, file.name || "audio");
+  if (pcm) fd.append("file_format", "pcm_s16le_16"); // raw 16 kHz mono PCM: lowest server latency
   if (url) fd.append("source_url", url);
   fd.append("diarize", "true");
   fd.append("timestamps_granularity", "word");
@@ -719,7 +745,7 @@ function transcribeBatch({ file, url }, onProgress, onXhr) {
     x.upload.onload = () => onProgress && onProgress("processing");
     x.onload = () => {
       if (x.status >= 200 && x.status < 300) { try { resolve(JSON.parse(x.responseText)); } catch { reject(new Error("Couldn't read the response")); } }
-      else reject(new Error(apiError(x.status, x.responseText)));
+      else { const e = new Error(apiError(x.status, x.responseText)); e.status = x.status; reject(e); }
     };
     x.onerror = () => reject(new Error("Network error. Check your internet connection."));
     x.onabort = () => { const e = new Error("Canceled"); e.canceled = true; reject(e); };
@@ -740,32 +766,184 @@ function requireKey() {
   return false;
 }
 const currentListId = () => (S.lists.some(l => l.id === S.filter) ? S.filter : null);
-function addJobs(items) {
-  if (!requireKey()) return;
-  const list = currentListId();
-  for (const it of items) S.jobs.push({ id: uid(), ...it, list, state: "queued", p: 0, t0: 0 });
-  renderJobs(); runJobs();
+/* ---------- staging: confirm files before anything is sent ---------- */
+S.staged = [];
+const fmtSize = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? Math.round(b / 1e6) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
+function probeDuration(file) {
+  return new Promise(res => {
+    const el = document.createElement(/^video\//.test(file.type) ? "video" : "audio");
+    const url = URL.createObjectURL(file);
+    const done = v => { clearTimeout(t); el.removeAttribute("src"); el.load(); URL.revokeObjectURL(url); res(v); };
+    const t = setTimeout(() => done(null), 8000);
+    el.preload = "metadata"; el.muted = true;
+    el.onloadedmetadata = () => done(isFinite(el.duration) && el.duration > 0 ? el.duration : null);
+    el.onerror = () => done(null);
+    el.src = url;
+  });
 }
+function wavHeader(dataLen) {
+  const h = new DataView(new ArrayBuffer(44)), w = (o, s) => [...s].forEach((c, i) => h.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); h.setUint32(4, 36 + dataLen, true); w(8, "WAVE"); w(12, "fmt "); h.setUint32(16, 16, true);
+  h.setUint16(20, 1, true); h.setUint16(22, 1, true); h.setUint32(24, 16000, true); h.setUint32(28, 32000, true);
+  h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, "data"); h.setUint32(40, dataLen, true);
+  return h.buffer;
+}
+/* Runs as soon as a file is staged, so the work overlaps with the user checking the file.
+   Decodes in the browser to 16 kHz mono PCM when that makes the upload meaningfully smaller (video, WAV, big files). */
+async function prepItem(it) {
+  it.dur = await probeDuration(it.file);
+  updateStageItem(it);
+  const keep = note => { it.prepState = "original"; it.note = note; };
+  if (!S.settings.optimize) return keep("");
+  const phone = isMobile() || /android|iphone|ipad/i.test(navigator.userAgent);
+  const maxSize = phone ? 350e6 : 1.2e9, maxDur = phone ? 45 * 60 : 100 * 60;
+  const pcmBytes = it.dur ? it.dur * 32000 : null;
+  if (pcmBytes && it.file.size <= pcmBytes * 1.15) return keep("Already compact — sending as is");
+  if (it.file.size > maxSize || (it.dur && it.dur > maxDur)) return keep("Too long to optimize on this device — sending as is");
+  it.prepState = "optimizing"; updateStageItem(it);
+  try {
+    let ab = await it.file.arrayBuffer();
+    if (it.dropped) return;
+    const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 16000, 16000);
+    const buf = await new Promise((res, rej) => { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+    ab = null;
+    if (it.dropped) return;
+    const n = buf.length, chs = buf.numberOfChannels, data = [];
+    for (let c = 0; c < chs; c++) data.push(buf.getChannelData(c));
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i += 1 << 20) {
+      const end = Math.min(n, i + (1 << 20));
+      for (let j = i; j < end; j++) {
+        let s = 0; for (let c = 0; c < chs; c++) s += data[c][j];
+        s /= chs; s = s < -1 ? -1 : s > 1 ? 1 : s;
+        out[j] = s < 0 ? s * 32768 : s * 32767;
+      }
+      await new Promise(r => setTimeout(r)); // keep the page responsive
+    }
+    const pcm = new Blob([out.buffer], { type: "application/octet-stream" });
+    if (pcm.size >= it.file.size * 0.9) return keep("Already compact — sending as is");
+    if (!it.dur) it.dur = n / 16000;
+    it.out = { pcm, wav: new Blob([wavHeader(pcm.size), pcm], { type: "audio/wav" }) };
+    it.prepState = "optimized"; it.note = `Audio ready · ${fmtSize(it.file.size)} → ${fmtSize(pcm.size)}`;
+  } catch {
+    keep("Couldn't read the audio here — sending the original file");
+  }
+}
+function stageFiles(files) {
+  if (!requireKey()) return;
+  for (const f of files) {
+    const it = { id: uid(), file: f, title: f.name.replace(/\.[^.]+$/, ""), size: f.size, dur: null, prepState: "probing", note: "", preview: URL.createObjectURL(f) };
+    it.prep = prepItem(it).catch(() => {}).finally(() => updateStageItem(it));
+    S.staged.push(it);
+  }
+  if (S.view !== "new") go("new"); else renderStage();
+  setTimeout(() => $(".stage-foot")?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+}
+function stageLink(url, title) {
+  if (!requireKey()) return;
+  S.staged.push({ id: uid(), url, title, prepState: "link", note: "" });
+  renderStage();
+}
+function unstage(id) {
+  const it = S.staged.find(x => x.id === id); if (!it) return;
+  it.dropped = true;
+  if (it.preview) URL.revokeObjectURL(it.preview);
+  const pl = $("#stagePlayer"); if (pl.dataset.id === id) { pl.pause(); pl.removeAttribute("src"); pl.dataset.id = ""; }
+  S.staged = S.staged.filter(x => x !== it);
+  renderStage();
+}
+function stageMeta(it) {
+  const bits = [];
+  if (it.file) { bits.push(`<span class="fn" title="${esc(it.file.name)}">${esc(it.file.name)}</span>`, `<span>${fmtSize(it.size)}</span>`); }
+  else bits.push(`<span class="fn" title="${esc(it.url)}">${esc(it.url)}</span>`);
+  if (it.dur) bits.push(`<span>${fmtTime(it.dur)}</span>`);
+  const st = it.prepState === "probing" ? "Checking…" : it.prepState === "optimizing" ? "Optimizing audio…" : it.note;
+  if (st) bits.push(`<span class="${it.prepState === "optimized" ? "ok" : ""}">${esc(st)}</span>`);
+  return bits.join("");
+}
+const ICON_PLAY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>`;
+const ICON_PAUSE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>`;
+const ICON_LINK = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>`;
+function renderStage() {
+  const box = $("#stage");
+  if (!S.staged.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  const n = S.staged.length, total = S.staged.reduce((a, it) => a + (it.dur || 0), 0);
+  const l = currentListId();
+  box.innerHTML = `<div class="stage-head"><b>Check before transcribing</b><span class="fine" id="stageSum">${n} item${n === 1 ? "" : "s"}${total ? " · " + fmtDur(total) : ""}</span></div>
+    <div>${S.staged.map(it => `<div class="si" data-si="${it.id}">
+      ${it.file ? `<button class="si-play" data-play="${it.id}" aria-label="Play a preview of ${esc(it.title)}">${ICON_PLAY}</button>` : `<span class="si-play link" aria-hidden="true">${ICON_LINK}</span>`}
+      <div style="min-width:0"><input class="si-title" data-title="${it.id}" value="${esc(it.title)}" aria-label="Title"><div class="si-meta">${stageMeta(it)}</div></div>
+      <button class="x" data-unstage="${it.id}" aria-label="Remove ${esc(it.title)}" title="Remove">${ICON_X}</button></div>`).join("")}</div>
+    <div class="stage-foot"><span class="fine">${l ? `Goes into “${esc(listName(l))}”` : ""}</span>
+      <button class="btn btn-line" data-stage-clear>Cancel</button>
+      <button class="btn btn-primary" data-stage-go>Transcribe${n > 1 ? " " + n + " items" : ""}</button></div>`;
+}
+function updateStageItem(it) {
+  const row = $(`[data-si="${it.id}"] .si-meta`);
+  if (row) row.innerHTML = stageMeta(it); else return;
+  const total = S.staged.reduce((a, x) => a + (x.dur || 0), 0), n = S.staged.length;
+  const sum = $("#stageSum"); if (sum) sum.textContent = `${n} item${n === 1 ? "" : "s"}${total ? " · " + fmtDur(total) : ""}`;
+}
+$("#stage").addEventListener("input", e => { const t = e.target.closest("[data-title]"); if (t) { const it = S.staged.find(x => x.id === t.dataset.title); if (it) it.title = t.value; } });
+$("#stage").addEventListener("click", e => {
+  const p = e.target.closest("[data-play]"), x = e.target.closest("[data-unstage]");
+  if (x) { unstage(x.dataset.unstage); return; }
+  if (p) {
+    const it = S.staged.find(s => s.id === p.dataset.play), pl = $("#stagePlayer");
+    $$("[data-play]").forEach(b => b.innerHTML = ICON_PLAY);
+    if (pl.dataset.id === it.id && !pl.paused) { pl.pause(); return; }
+    if (pl.dataset.id !== it.id) { pl.src = it.preview; pl.dataset.id = it.id; }
+    pl.play().then(() => { p.innerHTML = ICON_PAUSE; }).catch(() => toast("This file can't be previewed here, but it can still be transcribed."));
+    return;
+  }
+  if (e.target.closest("[data-stage-clear]")) { [...S.staged].forEach(it => unstage(it.id)); return; }
+  if (e.target.closest("[data-stage-go]")) {
+    $("#stagePlayer").pause();
+    const list = currentListId();
+    for (const it of S.staged) S.jobs.push({ id: uid(), item: it, file: it.file, url: it.url, title: (it.title || "").trim() || "Untitled", list, state: "queued", p: 0, t0: 0 });
+    S.staged = [];
+    renderStage(); renderJobs(); runJobs();
+  }
+});
+$("#stagePlayer").addEventListener("ended", () => $$("[data-play]").forEach(b => b.innerHTML = ICON_PLAY));
+$("#stagePlayer").addEventListener("pause", () => $$("[data-play]").forEach(b => b.innerHTML = ICON_PLAY));
+
 let jobsRunning = false;
 async function runJobs() {
   if (jobsRunning) return;
   jobsRunning = true;
   let job;
   while ((job = S.jobs.find(j => j.state === "queued"))) {
-    job.state = "upload"; job.t0 = Date.now(); renderJobs();
+    job.t0 = Date.now();
+    const it = job.item || {};
+    if (it.prep && !["optimized", "original"].includes(it.prepState)) { job.state = "prep"; renderJobs(); await it.prep; }
+    if (job.state === "canceled") { S.jobs = S.jobs.filter(j => j !== job); renderJobs(); continue; }
+    job.state = "upload"; job.p = 0; renderJobs();
+    const onProg = (phase, p) => { if (job.state === "canceled") return; job.state = phase; if (p != null) job.p = p; renderJobs(); };
+    const onXhr = x => { job.xhr = x; };
     try {
-      const r = await transcribeBatch({ file: job.file, url: job.url },
-        (phase, p) => { if (job.state === "canceled") return; job.state = phase; if (p != null) job.p = p; renderJobs(); },
-        x => { job.xhr = x; });
+      let r;
+      if (it.out) {
+        try { r = await transcribeBatch({ file: new File([it.out.pcm], "audio.pcm"), pcm: true }, onProg, onXhr); }
+        catch (e) { // raw PCM rejected for some reason → same audio as a normal WAV file
+          if (e.canceled || !(e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 402)) throw e;
+          job.state = "upload"; job.p = 0; renderJobs();
+          r = await transcribeBatch({ file: new File([it.out.wav], "audio.wav", { type: "audio/wav" }) }, onProg, onXhr);
+        }
+      } else r = await transcribeBatch({ file: job.file, url: job.url }, onProg, onXhr);
       const doc = newDoc({ title: job.title, source: job.url ? "link" : "file", sourceName: job.url || job.file.name, list: job.list, ...resultToFields(r) });
+      if (!doc.duration && it.dur) doc.duration = it.dur;
       ensureSpeakers(doc);
-      if (job.file && S.settings.keep && job.file.size < 1024 ** 3) {
-        try { await dbPut("media", { id: doc.id, blob: job.file, type: job.file.type }); doc.hasMedia = true; } catch { toast("Not enough storage to keep the original audio."); }
+      const keepBlob = it.out ? it.out.wav : job.file;
+      if (keepBlob && S.settings.keep && keepBlob.size < 1024 ** 3) {
+        try { await dbPut("media", { id: doc.id, blob: keepBlob, type: keepBlob.type }); doc.hasMedia = true; } catch { toast("Not enough storage to keep the original audio."); }
       }
+      if (it.preview) URL.revokeObjectURL(it.preview);
       await dbPut("docs", doc);
       job.state = "done"; job.docId = doc.id; job.xhr = null;
       await refreshDocs();
-      const solo = S.view === "new" && !S.jobs.some(j => ["queued", "upload", "processing"].includes(j.state));
+      const solo = S.view === "new" && !S.staged.length && !S.jobs.some(j => ["queued", "prep", "upload", "processing"].includes(j.state));
       if (solo) { S.jobs = S.jobs.filter(j => j !== job); go("doc", doc.id); }
       else toast(`“${doc.title}” is ready`, { label: "Open", fn: () => go("doc", doc.id) });
     } catch (e) {
@@ -779,21 +957,25 @@ async function runJobs() {
 }
 function cancelJob(id) {
   const j = S.jobs.find(j => j.id === id); if (!j) return;
-  const wasProcessing = j.state === "processing";
+  const wasProcessing = j.state === "processing", wasPrep = j.state === "prep";
   j.state = "canceled";
-  if (j.xhr) j.xhr.abort(); else S.jobs = S.jobs.filter(x => x !== j);
+  if (j.item) j.item.dropped = true; // stops any audio preparation still running
+  if (j.xhr) j.xhr.abort(); else if (!wasPrep) S.jobs = S.jobs.filter(x => x !== j);
+  if (wasPrep) S.jobs = S.jobs.filter(x => x !== j); // runJobs sees "canceled" once prep resolves
   renderJobs();
-  toast(wasProcessing ? "Canceled. If ElevenLabs had already started, those minutes may still be counted." : "Upload canceled");
+  toast(wasProcessing ? "Canceled. If ElevenLabs had already started, those minutes may still be counted." : "Canceled — nothing was sent");
 }
-setInterval(() => { if (S.jobs.some(j => j.state === "processing")) renderJobs(); }, 1000);
+setInterval(() => { if (S.jobs.some(j => j.state === "processing" || j.state === "prep")) renderJobs(); }, 1000);
 function renderJobs() {
   S.jobs = S.jobs.filter(j => !(j.state === "done" && j.seen));
   const html = S.jobs.map(j => {
     const secs = j.t0 ? Math.round((Date.now() - j.t0) / 1000) : 0;
     let s = "", bar = "", x = "";
     const xBtn = label => `<button class="x" data-cancel="${j.id}" aria-label="${label}" title="${label}">${ICON_X}</button>`;
+    const up = j.item && j.item.out ? j.item.out.pcm.size : j.file ? j.file.size : 0;
     if (j.state === "queued") { s = "Waiting"; x = xBtn("Remove from queue"); }
-    else if (j.state === "upload") { s = `Uploading ${Math.round(j.p * 100)}%`; bar = `<div class="bar"><i style="width:${Math.round(j.p * 100)}%"></i></div>`; x = xBtn("Cancel upload"); }
+    else if (j.state === "prep") { s = "Preparing audio…"; bar = `<div class="bar indet"><i></i></div>`; x = xBtn("Cancel"); }
+    else if (j.state === "upload") { s = `Uploading ${Math.round(j.p * 100)}%${up ? " of " + fmtSize(up) : ""}`; bar = `<div class="bar"><i style="width:${Math.round(j.p * 100)}%"></i></div>`; x = xBtn("Cancel upload"); }
     else if (j.state === "processing") { s = `Transcribing · ${fmtTime(secs)}`; bar = `<div class="bar indet"><i></i></div>`; x = xBtn("Cancel"); }
     else if (j.state === "done") { s = `<button class="tb" data-open="${j.docId}">Open</button>`; x = `<button class="x" data-dismiss="${j.id}" aria-label="Dismiss">${ICON_X}</button>`; }
     else if (j.state === "error") { s = esc(j.err); }
@@ -1245,7 +1427,7 @@ function showNew() {
   const l = currentListId();
   $("#newListNote").hidden = !l;
   if (l) $("#newListNote").textContent = `New transcripts will go into “${listName(l)}”.`;
-  renderJobs(); renderSideLists();
+  renderStage(); renderJobs(); renderSideLists();
 }
 
 /* ---------- doc view ---------- */
@@ -1696,14 +1878,15 @@ function queueFiles(files) {
   const ok = files.filter(f => /^(audio|video)\//.test(f.type) || /\.(m4a|mp3|wav|ogg|opus|flac|aac|webm|mp4|mov|mkv|wma|amr|3gp)$/i.test(f.name));
   if (!ok.length) { toast("Only audio and video files can be transcribed"); return; }
   if (ok.some(f => f.size > 5 * 1024 ** 3)) { toast("Files over 5 GB can't be uploaded"); return; }
-  addJobs(ok.map(f => ({ file: f, title: f.name.replace(/\.[^.]+$/, "") })));
+  if (ok.length < files.length) toast(`Skipped ${files.length - ok.length} file(s) that aren't audio or video`);
+  stageFiles(ok);
 }
 $("#btnUrl").addEventListener("click", () => {
   const v = $("#url").value.trim();
   if (!/^https?:\/\/\S+$/i.test(v)) { toast("Paste a link that starts with https://"); $("#url").focus(); return; }
   let title = v;
   try { const u = new URL(v); title = u.hostname.replace(/^www\./, "") + (u.pathname.length > 1 ? " " + u.pathname.split("/").filter(Boolean).pop().slice(0, 40) : ""); if (/youtu/.test(u.hostname)) title = "YouTube " + (u.searchParams.get("v") || u.pathname.split("/").pop()); } catch {}
-  addJobs([{ url: v, title }]);
+  stageLink(v, title);
   $("#url").value = "";
 });
 $("#url").addEventListener("keydown", e => { if (e.key === "Enter") $("#btnUrl").click(); });
@@ -1755,7 +1938,7 @@ $("#btnThemeM").addEventListener("click", toggleTheme);
 function openSettings(note) {
   const st = S.settings, f = $("#formSettings");
   $("#sKey").value = st.key; $("#sLang").value = st.lang; $("#sSpk").value = st.speakers; $("#sTerms").value = st.terms;
-  $("#sEvents").checked = st.events; $("#sClean").checked = st.clean; $("#sCs").checked = st.cs; $("#sKeep").checked = st.keep;
+  $("#sEvents").checked = st.events; $("#sClean").checked = st.clean; $("#sCs").checked = st.cs; $("#sKeep").checked = st.keep; $("#sOpt").checked = st.optimize;
   $(".notice", f)?.remove();
   if (note) $(".lead", f).insertAdjacentHTML("afterend", `<div class="notice" style="margin-bottom:14px">${esc(note)}</div>`);
   $("#dlgSettings").showModal();
@@ -1767,7 +1950,7 @@ $("#btnShowKey").addEventListener("click", e => { const k = $("#sKey"); k.type =
 $("#formSettings").addEventListener("submit", () => {
   const st = S.settings;
   st.key = $("#sKey").value.trim(); st.lang = $("#sLang").value; st.speakers = $("#sSpk").value; st.terms = $("#sTerms").value;
-  st.events = $("#sEvents").checked; st.clean = $("#sClean").checked; st.cs = $("#sCs").checked; st.keep = $("#sKeep").checked;
+  st.events = $("#sEvents").checked; st.clean = $("#sClean").checked; st.cs = $("#sCs").checked; st.keep = $("#sKeep").checked; st.optimize = $("#sOpt").checked;
   saveSettings();
   document.body.classList.toggle("no-cs", !st.cs);
   $("#keyNote").hidden = !!st.key;
