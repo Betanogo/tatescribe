@@ -222,6 +222,12 @@ button.chip:hover{text-decoration:underline}
 .txt:hover{background:var(--sunk)}
 .txt[contenteditable="true"]{background:var(--surface);box-shadow:0 0 0 2px var(--accent)}
 .txt.event{color:var(--faint);font-style:italic}
+.unsure{background:color-mix(in srgb,#F5A524 26%,transparent);box-shadow:inset 0 -2px 0 #D98A0B;border-radius:3px;cursor:pointer;padding:0 1px}
+.unsure:hover{background:color-mix(in srgb,#F5A524 45%,transparent)}
+.tb.review{border-color:#D98A0B;color:#9A5B00;background:color-mix(in srgb,#F5A524 12%,var(--surface))}
+.tb.review:hover{border-color:#9A5B00}
+:root[data-theme="dark"] .tb.review{color:#F2B65A}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tb.review{color:#F2B65A}}
 mark{background:#FFE36E;color:#161C27;border-radius:3px;padding:0 1px}
 mark.cur{background:#FF9F43}
 .partial .txt{font-style:italic;color:var(--faint)}
@@ -419,6 +425,7 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
               <input class="input" id="q" type="search" placeholder="Search (Enter for next)">
               <span class="cnt" id="qCnt"></span>
             </label>
+            <button class="tb review" id="btnUnsure" hidden title="Jump to the next word the AI wasn't sure about, play it, and fix it if needed"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4h11l-1.5 4L15 12H4"/></svg><span>Words to check</span></button>
             <span class="split">
               <button class="tb" id="btnTxt" title="Download as .txt"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>Export TXT</button>
               <button class="tb" id="btnExport" aria-label="More export formats" title="More formats"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
@@ -482,8 +489,13 @@ dialog::backdrop{background:rgba(10,14,20,.45)}
     </div>
     <label class="field"><span>Vocabulary</span>
       <textarea class="input" id="sTerms" rows="3" placeholder="One per line or comma-separated&#10;e.g. Guardian, CFTPO, 김민지, OKR"></textarea>
-      <small>File transcription favours these words. Up to about 100; adds a small surcharge per hour.</small>
+      <small>Files and live recording favour these words. Up to about 100; adds a small surcharge per hour.</small>
     </label>
+    <label class="field"><span>Auto-fixes</span>
+      <textarea class="input" id="sFixes" rows="3" placeholder="wrong → right, one per line&#10;e.g. 씨에프티피오 → CFTPO"></textarea>
+      <small>Applied to every new transcript. When you correct a word, TateScribe offers to add it here. The right spellings are also sent as vocabulary.</small>
+    </label>
+    <label class="check"><input type="checkbox" id="sUnsure"><span>Flag words to check<small>Highlight words the AI wasn't confident about, so you only need to listen to those spots.</small></span></label>
     <label class="check"><input type="checkbox" id="sEvents"><span>Tag sounds<small>Mark non-speech like (laughter) or (applause).</small></span></label>
     <label class="check"><input type="checkbox" id="sClean"><span>Clean verbatim<small>Drop filler words like “um” and “uh”, false starts and stutters.</small></span></label>
     <label class="check"><input type="checkbox" id="sCs"><span>Highlight mixed languages<small>Colour the English (or other language) parts inside Korean, Japanese or Chinese lines.</small></span></label>
@@ -518,7 +530,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 /* ---------- settings + lists ---------- */
-const DEFAULTS = { key: "", lang: "", speakers: "", terms: "", events: true, clean: false, cs: true, keep: true, optimize: true, theme: "", exportOpts: { time: true, spk: true }, sort: "new", bannerOff: false };
+const DEFAULTS = { key: "", lang: "", speakers: "", terms: "", events: true, clean: false, cs: true, keep: true, optimize: true, unsure: true, fixes: [], theme: "", exportOpts: { time: true, spk: true }, sort: "new", bannerOff: false };
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("ts.settings") || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -617,7 +629,8 @@ function segLang(text, docLang, segCode) {
   if (!cjk) return { label: (seg && !isCJK(seg) && !g) ? seg : latin, mixed: false };
   return { label: cjk + "+" + latin, mixed: true };
 }
-function renderText(text, query) {
+const isMixedScript = t => RE_HANGUL.test(t) || RE_KANA.test(t) || RE_HAN.test(t);
+function renderText(text, query, mixedOverride) {
   const t = String(text || "");
   if (query) {
     const qi = t.toLowerCase(), ql = query.toLowerCase();
@@ -625,12 +638,100 @@ function renderText(text, query) {
     while ((j = qi.indexOf(ql, i)) !== -1) { out += esc(t.slice(i, j)) + "<mark>" + esc(t.slice(j, j + ql.length)) + "</mark>"; i = j + ql.length; }
     return out + esc(t.slice(i));
   }
-  const mixed = RE_HANGUL.test(t) || RE_KANA.test(t) || RE_HAN.test(t);
+  const mixed = mixedOverride ?? isMixedScript(t);
   return t.split(/(\([^)]*\)|\[[^\]]*\])/).map((chunk, k) => {
     if (k % 2) return `<span class="evt">${esc(chunk)}</span>`;
     if (!mixed) return esc(chunk);
     return chunk.split(RE_LATIN_RUN).map((part, i) => (i % 2 && part.replace(/[^A-Za-zÀ-ÿ]/g, "").length >= 2) ? `<span class="cs">${esc(part)}</span>` : esc(part)).join("");
   }).join("");
+}
+
+/* ---------- unsure words (Scribe confidence per word) ---------- */
+const UNSURE = Math.log(0.5); // flag words the model gave less than ~50% confidence
+function unsureRanges(seg) {
+  if (S.settings.unsure === false || seg.edited || seg.ok || !seg.words || !seg.words.length) return [];
+  const out = []; let cur = 0;
+  for (const w of seg.words) {
+    const t = (w.t || "").trim(); if (!t) continue;
+    const i = seg.text.indexOf(t, cur); if (i < 0) continue;
+    cur = i + t.length;
+    if (w.p != null && w.p < UNSURE && /[\p{L}\p{N}]/u.test(t)) out.push([i, i + t.length, w.s, w.e]);
+  }
+  return out;
+}
+function renderSegText(seg) {
+  if (S.q) return renderText(seg.text, S.q);
+  const rs = unsureRanges(seg);
+  if (!rs.length) return renderText(seg.text);
+  const t = seg.text, mixed = isMixedScript(t);
+  let out = "", i = 0;
+  for (const [a, b, ws, we] of rs) {
+    out += renderText(t.slice(i, a), null, mixed) +
+      `<span class="unsure" data-a="${a}" data-b="${b}" data-ws="${ws}" data-we="${we}" title="Not sure about this word — click to hear it">${renderText(t.slice(a, b), null, mixed)}</span>`;
+    i = b;
+  }
+  return out + renderText(t.slice(i), null, mixed);
+}
+
+/* ---------- auto-fix rules learned from your edits ---------- */
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const RE_LATIN_ONLY = /^[A-Za-zÀ-ÿ0-9' .\-]+$/;
+function applyFixesStr(s) {
+  for (const f of S.settings.fixes || []) {
+    if (!f.from || !f.to) continue;
+    const re = RE_LATIN_ONLY.test(f.from)
+      ? new RegExp(`(?<![A-Za-zÀ-ÿ0-9])${escRe(f.from)}(?![A-Za-zÀ-ÿ0-9])`, "gi")
+      : new RegExp(escRe(f.from), "g");
+    s = s.replace(re, () => f.to);
+  }
+  return s;
+}
+function applyFixes(seg) {
+  const t = applyFixesStr(seg.text);
+  if (t === seg.text) return 0;
+  seg.text = t;
+  (seg.words || []).forEach(w => { const n = applyFixesStr(w.t || ""); if (n !== w.t) { w.t = n; w.p = 0; } });
+  if ((S.settings.fixes || []).some(f => /\s/.test(f.from) && t.includes(f.to))) seg.edited = true; // multi-word fix: word timings no longer line up
+  return 1;
+}
+/* Right spellings from your fixes double as vocabulary hints for ElevenLabs. */
+function allTerms() {
+  return parseTerms(S.settings.terms + "\n" + (S.settings.fixes || []).map(f => f.to).join("\n")).slice(0, 1000);
+}
+function parseFixes(str) {
+  return String(str || "").split("\n").map(l => l.split(/\s*(?:→|->|=>)\s*/)).filter(p => p.length === 2 && p[0].trim() && p[1].trim())
+    .map(([a, b]) => ({ from: a.trim(), to: b.trim() }));
+}
+const fixesToText = fx => (fx || []).map(f => `${f.from} → ${f.to}`).join("\n");
+/* Work out the one thing that changed in an edit, so it can be offered as a rule. */
+function diffFix(oldT, newT) {
+  let a = 0; while (a < oldT.length && a < newT.length && oldT[a] === newT[a]) a++;
+  let b = 0; while (b < oldT.length - a && b < newT.length - a && oldT[oldT.length - 1 - b] === newT[newT.length - 1 - b]) b++;
+  const isL = c => /[A-Za-zÀ-ÿ0-9']/.test(c || "");
+  while (a > 0 && isL(oldT[a - 1])) a--;                 // never split a Latin word
+  while (b > 0 && isL(oldT[oldT.length - b])) b--;
+  let from = oldT.slice(a, oldT.length - b), to = newT.slice(a, newT.length - b);
+  if (from.trim().replace(/\s/g, "").length < 2 || to.trim().replace(/\s/g, "").length < 1) { // tiny Korean change: use the whole word
+    while (a > 0 && !/\s/.test(oldT[a - 1])) a--;
+    while (b > 0 && !/\s/.test(oldT[oldT.length - b])) b--;
+    from = oldT.slice(a, oldT.length - b); to = newT.slice(a, newT.length - b);
+  }
+  from = from.trim(); to = to.trim();
+  if (!from || !to || from === to) return null;
+  if (from.split(/\s+/).length > 3 || to.split(/\s+/).length > 4 || from.length > 40 || to.length > 40) return null;
+  if ((S.settings.fixes || []).some(f => f.from === from)) return null;
+  return { from, to };
+}
+function offerFix(oldT, newT) {
+  const fx = diffFix(oldT, newT); if (!fx) return;
+  toast(`Always change “${fx.from}” to “${fx.to}”?`, { label: "Always", fn: () => addFix(fx) }, 9000);
+}
+function addFix(fx) {
+  S.settings.fixes = (S.settings.fixes || []).concat(fx);
+  saveSettings();
+  let n = 0;
+  if (S.cur) { S.cur.segments.forEach(s => { n += applyFixes(s); }); if (n) { saveDocSoon(S.cur); renderSegs(); } }
+  toast(n ? `Saved. Fixed ${n} more line${n === 1 ? "" : "s"} here too.` : "Saved — it'll be fixed automatically from now on.");
 }
 
 /* ---------- IndexedDB ---------- */
@@ -690,7 +791,7 @@ function buildSegments(words, fallbackText) {
     const piece = w.type === "audio_event" && !/^[(\[]/.test(w.text) ? `(${w.text})` : w.text;
     cur.text += piece;
     cur.end = Math.max(cur.end, en);
-    cur.words.push({ t: piece, s: st, e: en });
+    cur.words.push({ t: piece, s: st, e: en, p: w.type === "audio_event" ? null : (w.logprob ?? null) });
     if (w.type !== "audio_event") cur.event = false;
   }
   flush();
@@ -735,7 +836,7 @@ function transcribeBatch({ file, url, pcm }, onProgress, onXhr) {
   if (st.clean) fd.append("no_verbatim", "true");
   if (st.lang) fd.append("language_code", st.lang);
   if (st.speakers) fd.append("num_speakers", st.speakers);
-  for (const k of parseTerms(st.terms)) fd.append("keyterms", k);
+  for (const k of allTerms()) fd.append("keyterms", k);
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
     onXhr && onXhr(x);
@@ -756,7 +857,9 @@ function transcribeBatch({ file, url, pcm }, onProgress, onXhr) {
 function resultToFields(r) {
   const words = r.words || [];
   const lastEnd = words.reduce((m, w) => Math.max(m, w.end || 0), 0);
-  return { segments: buildSegments(words, r.text), language: r.language_code || "", duration: r.audio_duration_secs || lastEnd, diarized: true, speakers: {} };
+  const segments = buildSegments(words, r.text);
+  segments.forEach(applyFixes);
+  return { segments, language: r.language_code || "", duration: r.audio_duration_secs || lastEnd, diarized: true, speakers: {} };
 }
 
 /* ---------- job queue (files / links) ---------- */
@@ -1064,6 +1167,9 @@ class LiveSession {
     const p = new URLSearchParams({ model_id: "scribe_v2_realtime", token, audio_format: "pcm_16000", commit_strategy: "vad", include_timestamps: "true", include_language_detection: "true" });
     if (S.settings.lang) p.set("language_code", S.settings.lang);
     if (S.settings.clean) p.set("no_verbatim", "true");
+    const terms = this.useTerms === false ? [] : allTerms().slice(0, 100);
+    terms.forEach(t => p.append("keyterms", t));
+    this.termsSent = terms.length > 0;
     this.offset = this.elapsed();
     const ws = new WebSocket(WSS + "?" + p.toString());
     this.ws = ws;
@@ -1102,7 +1208,7 @@ class LiveSession {
         if (!text) break;
         const now = this.elapsed();
         const est = Math.max(this.offset, now - Math.max(1.2, text.length * 0.07) - 0.8);
-        const seg = { id: uid(), speaker: "speaker_0", start: est, end: now, text, words: [], _pending: true };
+        const seg = { id: uid(), speaker: "speaker_0", start: est, end: now, text: applyFixesStr(text), words: [], _pending: true };
         this.doc.segments.push(seg); this.lastSeg = seg;
         ensureSpeakers(this.doc); appendSeg(seg); saveDocSoon(this.doc);
         break;
@@ -1122,9 +1228,10 @@ class LiveSession {
           const s0 = base + words[0].start, s1 = base + words[words.length - 1].end;
           if (s0 >= base - 1 && s1 <= now + 3) {
             seg.start = s0; seg.end = s1;
-            seg.words = words.map(w => ({ t: w.text, s: base + w.start, e: base + (w.end ?? w.start) }));
+            seg.words = words.map(w => ({ t: w.text, s: base + w.start, e: base + (w.end ?? w.start), p: w.logprob ?? null }));
           }
         }
+        applyFixes(seg);
         if (!this.doc.language && m.language_code) this.doc.language = m.language_code;
         updateSegEl(seg); saveDocSoon(this.doc);
         break;
@@ -1132,6 +1239,12 @@ class LiveSession {
       case "warning": break;
       default:
         if (m.error) {
+          if (m.message_type === "invalid_request" && this.termsSent) {
+            // vocabulary rejected for some reason: carry on without it rather than failing the recording
+            this.useTerms = false; this.state("Reconnecting without vocabulary…");
+            try { this.ws && this.ws.close(); } catch {}
+            return;
+          }
           if (["auth_error", "quota_exceeded", "unaccepted_terms"].includes(m.message_type)) {
             this.stopping = true;
             const why = m.message_type === "auth_error" ? "API key was rejected." : m.message_type === "quota_exceeded" ? "Not enough ElevenLabs credits." : "Accept the Scribe terms in your ElevenLabs dashboard first.";
@@ -1489,7 +1602,7 @@ function segHTML(seg, prev) {
   else if (badge && segLang(prev.text, d.language, prev.lang).label !== L.label) who = `<div class="seg-who">${badge}</div>`;
   return `<div class="seg ${cont ? "cont" : ""}" data-id="${esc(seg.id)}">
     <button class="tm mono" data-seek="${seg.start}" title="Play from here">${fmtTime(seg.start)}</button>
-    <div>${who}<div class="txt ${seg.event ? "event" : ""}" data-edit="${esc(seg.id)}" tabindex="0" title="Click to edit">${renderText(seg.text, S.q)}</div></div>
+    <div>${who}<div class="txt ${seg.event ? "event" : ""}" data-edit="${esc(seg.id)}" tabindex="0" title="Click to edit">${renderSegText(seg)}</div></div>
   </div>`;
 }
 function renderSegs() {
@@ -1502,6 +1615,18 @@ function renderSegs() {
   }
   box.innerHTML = d.segments.map((s, i) => segHTML(s, d.segments[i - 1])).join("") + partial;
   if (S.q) updateSearchCount();
+  updateUnsureBtn();
+}
+function allUnsure() {
+  if (!S.cur || S.live) return [];
+  const out = [];
+  for (const seg of S.cur.segments) for (const r of unsureRanges(seg)) out.push({ seg, r });
+  return out;
+}
+function updateUnsureBtn() {
+  const n = allUnsure().length, b = $("#btnUnsure");
+  b.hidden = !n;
+  $("span", b).textContent = n === 1 ? "1 word to check" : `${n} words to check`;
 }
 function appendSeg(seg) {
   if (S.view !== "doc") return;
@@ -1517,6 +1642,7 @@ function updateSegEl(seg) {
   const i = S.cur.segments.indexOf(seg);
   const tmp = document.createElement("div"); tmp.innerHTML = segHTML(seg, S.cur.segments[i - 1]);
   el.replaceWith(tmp.firstElementChild);
+  if (!S.live) updateUnsureBtn();
 }
 function renderPartial(text) {
   const p = $("#partial"); if (!p) return;
@@ -1537,13 +1663,15 @@ $("#docTitle").addEventListener("blur", e => {
   e.target.textContent = t;
   if (t !== S.cur.title) { S.cur.title = t; if (!S.live) saveDocSoon(S.cur); }
 });
-function beginEdit(el) {
+function beginEdit(el, selA, selB) {
   if (S.live || el.isContentEditable) return;
   const seg = S.cur.segments.find(s => s.id === el.dataset.edit); if (!seg) return;
   el.textContent = seg.text;
   el.contentEditable = "true";
-  el.focus();
-  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+  el.focus({ preventScroll: true });
+  const r = document.createRange(), node = el.firstChild;
+  if (node && selA != null && selB <= node.length) { r.setStart(node, selA); r.setEnd(node, selB); } // select the doubtful word, ready to retype
+  else { r.selectNodeContents(el); r.collapse(false); }
   const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
 }
 function endEdit(el, cancel) {
@@ -1551,15 +1679,50 @@ function endEdit(el, cancel) {
   el.contentEditable = "false";
   if (!seg) return;
   const t = el.innerText.replace(/\s+\n/g, "\n").trim();
-  if (!cancel && t !== seg.text) {
-    if (!t) { if (confirm("Delete this line?")) { S.cur.segments = S.cur.segments.filter(s => s !== seg); saveDocSoon(S.cur); renderSegs(); return; } }
-    else { seg.text = t; seg.edited = true; seg.event = false; saveDocSoon(S.cur); }
+  if (!cancel) {
+    const changed = t !== seg.text;
+    if (changed && !t) { if (confirm("Delete this line?")) { S.cur.segments = S.cur.segments.filter(s => s !== seg); saveDocSoon(S.cur); renderSegs(); return; } }
+    else {
+      if (!seg.ok) { seg.ok = true; saveDocSoon(S.cur); } // you've looked at this line: stop flagging it
+      if (changed) { const old = seg.text; seg.text = t; seg.edited = true; seg.event = false; saveDocSoon(S.cur); offerFix(old, t); }
+    }
   }
   updateSegEl(seg);
 }
+/* Play just the few seconds around a word, then stop. */
+let stopAt = null;
+function playSnippet(ws, we) {
+  const a = $("#audio");
+  if ($("#player").hidden || !a.src) return false;
+  a.currentTime = Math.max(0, ws - 0.7);
+  stopAt = we + 0.9;
+  a.play().catch(() => {});
+  return true;
+}
+$("#audio").addEventListener("pause", () => { stopAt = null; });
+function reviewWord(seg, r) {
+  const segEl = $(`.seg[data-id="${CSS.escape(seg.id)}"]`); if (!segEl) return;
+  segEl.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  playSnippet(r[2], r[3]);
+  beginEdit($(".txt", segEl), r[0], r[1]);
+}
+$("#btnUnsure").addEventListener("mousedown", e => e.preventDefault()); // keep the open line's edit until we close it ourselves
+$("#btnUnsure").addEventListener("click", () => {
+  const open = $("#segs .txt[contenteditable=true]");
+  if (open) endEdit(open);
+  const next = allUnsure()[0];
+  if (next) reviewWord(next.seg, next.r);
+  else toast("All flagged words checked");
+});
 $("#segs").addEventListener("click", e => {
   const tm = e.target.closest("[data-seek]");
   if (tm) { seek(+tm.dataset.seek); return; }
+  const u = e.target.closest(".unsure");
+  if (u) {
+    const tx = u.closest("[data-edit]"), seg = S.cur.segments.find(s => s.id === tx.dataset.edit);
+    if (seg) reviewWord(seg, [+u.dataset.a, +u.dataset.b, +u.dataset.ws, +u.dataset.we]);
+    return;
+  }
   const chip = e.target.closest("[data-spk]");
   if (chip) { speakerMenu(chip); return; }
   const tx = e.target.closest("[data-edit]");
@@ -1636,6 +1799,7 @@ let activeId = null;
 $("#audio").addEventListener("timeupdate", () => {
   const d = S.cur; if (!d) return;
   const t = $("#audio").currentTime;
+  if (stopAt != null && t >= stopAt) { $("#audio").pause(); stopAt = null; }
   let seg = null;
   for (const s of d.segments) { if (s.start <= t + 0.05) seg = s; else break; }
   const id = seg ? seg.id : null;
@@ -1939,6 +2103,7 @@ function openSettings(note) {
   const st = S.settings, f = $("#formSettings");
   $("#sKey").value = st.key; $("#sLang").value = st.lang; $("#sSpk").value = st.speakers; $("#sTerms").value = st.terms;
   $("#sEvents").checked = st.events; $("#sClean").checked = st.clean; $("#sCs").checked = st.cs; $("#sKeep").checked = st.keep; $("#sOpt").checked = st.optimize;
+  $("#sUnsure").checked = st.unsure !== false; $("#sFixes").value = fixesToText(st.fixes);
   $(".notice", f)?.remove();
   if (note) $(".lead", f).insertAdjacentHTML("afterend", `<div class="notice" style="margin-bottom:14px">${esc(note)}</div>`);
   $("#dlgSettings").showModal();
@@ -1951,6 +2116,7 @@ $("#formSettings").addEventListener("submit", () => {
   const st = S.settings;
   st.key = $("#sKey").value.trim(); st.lang = $("#sLang").value; st.speakers = $("#sSpk").value; st.terms = $("#sTerms").value;
   st.events = $("#sEvents").checked; st.clean = $("#sClean").checked; st.cs = $("#sCs").checked; st.keep = $("#sKeep").checked; st.optimize = $("#sOpt").checked;
+  st.unsure = $("#sUnsure").checked; st.fixes = parseFixes($("#sFixes").value);
   saveSettings();
   document.body.classList.toggle("no-cs", !st.cs);
   $("#keyNote").hidden = !!st.key;
